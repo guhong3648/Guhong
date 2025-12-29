@@ -45,9 +45,7 @@ class Transform_bundle():
     def get_tensor(self, y):
         if not isinstance(y, torch.Tensor): y = torch.from_numpy(y)
         if (y.shape[-1]==6) & (len(y.shape)!=3): y = y.unsqueeze(0)
-        elif (y.shape[-1]==6) & (len(y.shape)!=3): raise ValueError(f'Invalid Shape: y={y.shape}')
         elif (y.shape[-1]!=6) & (len(y.shape)!=4): y = y.unsqueeze(0)
-        elif (y.shape[-1]!=6) & (len(y.shape)!=4): raise ValueError(f'Invalid Shape: y={y.shape}')
         
         return y.to(torch.float64).clone()
     

@@ -1,13 +1,15 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from copy import deepcopy
 from scipy.spatial.transform import Rotation as R
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 try:
     from pytorch3d.transforms import euler_angles_to_matrix
     from pytorch3d.transforms import matrix_to_euler_angles
+    from pytorch3d.transforms import matrix_to_quaternion
+    from pytorch3d.transforms import quaternion_to_matrix
 except ImportError:
     euler_angles_to_matrix = None
     matrix_to_euler_angles = None
@@ -23,15 +25,18 @@ def plot_emt(emt_data):
 '''
 - ZYX Cenvention = [yaw, pitch, roll]
 - After Initialization = [depth, lateral, elevational, yaw, pitch, roll]
-- Form = [param (6D Vector), tforms (4x4 Matrix)]
-- y_vec: [B, S, 6] parameter representation
-- a_vec: [B, S, 3] parameter representation of the Euler angle
-- Y_mat: [B, S, 4, 4] matrix representation
-- A_mat: [B, S, 3, 3] matrix representation of the Euler angle
-- y_rel: relative pos vec
-- y_abs: absolute pos vec
-- Y_rel: relative pos mat
-- Y_abs: absolute pos mat
+- Form =  [param (6D Vector), tforms (4x4 Matrix)]
+- y_vec:  [B, S, 6] parameter representation
+- a_vec:  [B, S, 3] parameter representation of the Euler angle
+- Y_mat:  [B, S, 4, 4] matrix representation
+- A_mat:  [B, S, 3, 3] matrix representation of the Euler angle
+- y_rel:  relative pos vec
+- y_abs:  absolute pos vec
+- Y_rel:  relative pos mat
+- Y_abs:  absolute pos mat
+
+- y_quat: [B, S, 7] [translation, Quaternion]
+- q_vec:  [B, S, 4] Quaternion
 '''
 
 class Transform_bundle():
@@ -44,8 +49,9 @@ class Transform_bundle():
     
     def get_tensor(self, y):
         if not isinstance(y, torch.Tensor): y = torch.from_numpy(y)
+        
         if (y.shape[-1]==6) & (len(y.shape)!=3): y = y.unsqueeze(0)
-        elif (y.shape[-1]!=6) & (len(y.shape)!=4): y = y.unsqueeze(0)
+        if (y.shape[-1]!=6) & (len(y.shape)!=4): y = y.unsqueeze(0)
         
         return y.to(torch.float64).clone()
     
@@ -157,3 +163,43 @@ class Transform_bundle():
             pose_rel = self.get_marge(s_vec, a_vec)
         
         return pose_rel
+    
+    def transform_m2q(self, Y_mat):
+        s_vec = Y_mat[..., :3,  3]
+        A_mat = Y_mat[..., :3, :3]
+
+        if self.p3d:
+            q_vec = matrix_to_quaternion(A_mat.to(torch.float32))  # (w,x,y,z)
+
+        else:
+            A_np = A_mat.detach().cpu().numpy()
+            A_flat = A_np.reshape(-1, 3, 3)
+            q_xyzw = R.from_matrix(A_flat).as_quat()  # (x,y,z,w)
+            q_wxyz = np.concatenate([q_xyzw[:, 3:4], q_xyzw[:, :3]], axis=1)
+            q_vec = torch.from_numpy(q_wxyz).to(A_mat.device).to(torch.float32)
+            q_vec = q_vec.reshape(*A_mat.shape[:2], 4)
+        
+        y_quat = torch.concat([s_vec, q_vec], axis=-1)
+        
+        return y_quat
+
+    def transform_q2m(self, y_quat):
+        s_vec = y_quat[..., :3]
+        q_vec = y_quat[..., 3:]
+        if self.p3d:
+            A_mat = quaternion_to_matrix(q_vec.to(torch.float32))
+            
+        else:
+            q_np = q_vec.detach().cpu().numpy()
+            q_flat = q_np.reshape(-1, 4)
+            q_xyzw = np.concatenate([q_flat[:, 1:], q_flat[:, 0:1]], axis=1)
+            A_np = R.from_quat(q_xyzw).as_matrix()
+            A_mat = torch.from_numpy(A_np).to(q_vec.device).to(torch.float32)
+            A_mat = A_mat.reshape(*q_vec.shape[:-1], 3, 3)
+
+        Y_mat = torch.eye(4, device=q_vec.device, dtype=A_mat.dtype)
+        Y_mat = Y_mat.expand(*A_mat.shape[:-2], 4, 4).clone()
+        Y_mat[..., :3, :3] = A_mat
+        Y_mat[..., :3,  3] = s_vec
+        
+        return Y_mat

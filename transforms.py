@@ -24,7 +24,7 @@ def plot_emt(emt_data):
     
 '''
 - ZYX Cenvention = [yaw, pitch, roll]
-- After Initialization = [depth, lateral, elevational, yaw, pitch, roll]
+- After Initialization = [lateral, depth, elevational, yaw, pitch, roll]
 - Form =  [param (6D Vector), tforms (4x4 Matrix)]
 - y_vec:  [B, S, 6] parameter representation
 - a_vec:  [B, S, 3] parameter representation of the Euler angle
